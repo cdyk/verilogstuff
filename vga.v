@@ -21,9 +21,10 @@ endmodule
 module sync(
 		output reg [13:0] hpos,
 		output reg [13:0] vpos,
-		output wire hsync,
-		output wire vsync,
+		output reg hsync,
+		output reg vsync,
 		output wire enable,
+		input clk_sync,
 		input clk_pixel
 	);
 	parameter WIDTH = 640;
@@ -41,7 +42,7 @@ module sync(
 		vpos = V_SIZE - 1;
 	end
 
-	always @(posedge clk_pixel) begin
+	always @(posedge clk_sync) begin
 		if(hpos == H_SIZE-1) begin
 			hpos <= 0;
 			if(vpos == V_SIZE-1) begin
@@ -55,8 +56,10 @@ module sync(
 			hpos <= hpos + 1;
 		end
 	end
-	assign hsync = hpos < H_FRONT_PORCH || H_SYNC_PULSE <= hpos ? 1 : 0;
-	assign vsync = vpos < V_FRONT_PORCH || V_SYNC_PULSE <= vpos ? 1 : 0;
+	always @(posedge clk_pixel) begin
+		hsync <= hpos < H_FRONT_PORCH || H_SYNC_PULSE <= hpos ? 1 : 0;
+		vsync <= vpos < V_FRONT_PORCH || V_SYNC_PULSE <= vpos ? 1 : 0;
+	end
 	assign enable = hpos < WIDTH && vpos < HEIGHT;
 endmodule
 
@@ -69,29 +72,58 @@ module vidgen(
 		input enable
 	);
 
-	reg [7:0] store[7:0];
+	reg [7:0] store[31:0];
 	initial begin
 		// $readmemh("foo.hex", store, 0); 
-		store[0] = 8'b00111000;
-		store[1] = 8'b01101100;
-		store[2] = 8'b11000110;
-		store[3] = 8'b11111110;
-		store[4] = 8'b11000110;
-		store[5] = 8'b11000110;
-		store[6] = 8'b11000110;
-		store[7] = 8'b00000000;
+		store[ 0] = 8'b01111100;
+		store[ 1] = 8'b11000110;
+		store[ 2] = 8'b11000110;
+		store[ 3] = 8'b11111110;
+		store[ 4] = 8'b11000110;
+		store[ 5] = 8'b11000110;
+		store[ 6] = 8'b11000110;
+		store[ 7] = 8'b00000000;
+
+		store[ 8] = 8'b11111100;
+		store[ 9] = 8'b11000110;
+		store[10] = 8'b11000110;
+		store[11] = 8'b11111100;
+		store[12] = 8'b11000110;
+		store[13] = 8'b11000110;
+		store[14] = 8'b11111100;
+		store[15] = 8'b00000000;
+
+		store[16] = 8'b01111100;
+		store[17] = 8'b11000110;
+		store[18] = 8'b11000000;
+		store[19] = 8'b11000000;
+		store[20] = 8'b11000000;
+		store[21] = 8'b11000110;
+		store[22] = 8'b01111100;
+		store[23] = 8'b00000000;
+
+		store[24] = 8'b11111100;
+		store[25] = 8'b11000110;
+		store[26] = 8'b11000110;
+		store[27] = 8'b11000110;
+		store[28] = 8'b11000110;
+		store[29] = 8'b11000110;
+		store[30] = 8'b11111100;
+		store[31] = 8'b00000000;
 	end
 
 	reg [7:0] shiftdta = 0;
 
 	always @(posedge clk_pixel) begin
 		if(enable) begin
-			if(hpos[2:0] == 3'd0) begin
-				//shiftdta <= 8'haa;
-				shiftdta[7:0] <= store[{vpos[2:0]}];
-			end
-			else begin
-				shiftdta[7:0] <= {shiftdta[6:0], 1'b0};
+			if(hpos[1:0] == 2'd0) begin
+				if(hpos[4:2] == 3'd0) begin
+					//shiftdta <= 8'haa;
+					shiftdta[7:0] <= store[{vpos[6:5]^hpos[6:5],vpos[4:2]}];
+				end
+				else begin
+					shiftdta[7:0] <= {shiftdta[6:0], 1'b0};
+				end
 			end
 		end
 		else shiftdta <= 0;
@@ -138,7 +170,7 @@ module testbench;
 
 	clock_by_4 cdiv(clk_pixel, clk_sync, clk);
 
-	sync sync(hpos, vpos, hsync, vsync, enable,  clk_sync);
+	sync sync(hpos, vpos, hsync, vsync, enable,  clk_sync, clk_pixel);
 	vidgen vidgen(px_out, hpos, vpos, clk_pixel, enable);
 	tester bar(clk, clk_pixel, clk_sync, hpos, vpos, hsync, vsync, enable, px_out);
 endmodule
