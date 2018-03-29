@@ -5,7 +5,7 @@ module clock_by_4(
 		output wire clk_out,
 		input clk_in
 	);
-	reg q0 = 0;
+	reg q0 = 1;
 	reg q1 = 0;
 
 	always @(posedge clk_in) begin
@@ -34,11 +34,11 @@ module sync(
 	parameter V_SIZE = 525;
 
 	initial begin
-		hpos = 0;
-		vpos = 0;
+		hpos = H_SIZE - 1;
+		vpos = V_SIZE - 1;
 	end
 
-	always @(negedge px_clk) begin
+	always @(posedge px_clk) begin
 		if(hpos == H_SIZE-1) begin
 			hpos <= 0;
 			if(vpos == V_SIZE-1) begin
@@ -72,7 +72,7 @@ module tester(
 	initial begin
 		$dumpfile("foo.vcd");	// Dump results to file.
 		$dumpvars;
-		clk = 0;
+		clk = 1;
 	//#18000000 $finish;
 	#1800000 $finish;
 	end
