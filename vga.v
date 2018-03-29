@@ -23,9 +23,9 @@ module sync(
 		output reg [13:0] vpos,
 		output reg hsync,
 		output reg vsync,
-		output wire enable,
-		input clk_sync,
-		input clk_pixel
+		output reg enable,
+		output reg clk_out,
+		input clk_in
 	);
 	parameter WIDTH = 640;
 	parameter H_FRONT_PORCH = WIDTH + 16;
@@ -40,29 +40,57 @@ module sync(
 	initial begin
 		hpos = H_SIZE - 1;
 		vpos = V_SIZE - 1;
+		hsync = 0;
+		vsync = 0;
+		enable = 0;
+		clk_out = 0;
 	end
 
-	always @(posedge clk_sync) begin
+	always @(posedge clk_in) begin
 		if(hpos == H_SIZE-1) begin
-			hpos <= 0;
+			hpos = 0;
 			if(vpos == V_SIZE-1) begin
-				vpos <= 0;
+				vpos = 0;
 			end
 			else begin
-				vpos <= vpos + 1;
+				vpos = vpos + 1;
 			end
 		end
 		else begin
-			hpos <= hpos + 1;
+			hpos = hpos + 1;
 		end
+		hsync = hpos < H_FRONT_PORCH || H_SYNC_PULSE <= hpos ? 1 : 0;
+		vsync = vpos < V_FRONT_PORCH || V_SYNC_PULSE <= vpos ? 1 : 0;
+		enable = hpos < WIDTH && vpos < HEIGHT;
+		clk_out = 1;
 	end
-	always @(posedge clk_pixel) begin
-		hsync <= hpos < H_FRONT_PORCH || H_SYNC_PULSE <= hpos ? 1 : 0;
-		vsync <= vpos < V_FRONT_PORCH || V_SYNC_PULSE <= vpos ? 1 : 0;
+	always @(negedge clk_in) begin
+		clk_out = 0;
 	end
-	assign enable = hpos < WIDTH && vpos < HEIGHT;
 endmodule
 
+module vidgenAA(
+		output wire px_out,
+		input [13:0] hpos,
+		input [13:0] vpos,
+		input clk_pixel,
+		input enable
+	);
+	reg [7:0] shiftdta = 0;
+
+	always @(posedge clk_pixel) begin
+		if(enable) begin
+			if(hpos[2:0] == 3'd0) begin
+				shiftdta = 8'b11011010;
+			end
+			else begin
+				shiftdta[7:0] = {shiftdta[6:0], 1'b0};
+			end
+		end
+		else shiftdta = 0;
+	end
+	assign px_out = shiftdta[7];
+endmodule
 
 module vidgen(
 		output wire px_out,
@@ -119,7 +147,7 @@ module vidgen(
 			if(hpos[1:0] == 2'd0) begin
 				if(hpos[4:2] == 3'd0) begin
 					//shiftdta <= 8'haa;
-					shiftdta[7:0] <= store[{vpos[6:5]^hpos[6:5],vpos[4:2]}];
+					shiftdta[7:0] <= 8'haa;// store[{vpos[6:5]^hpos[6:5],vpos[4:2]}];
 				end
 				else begin
 					shiftdta[7:0] <= {shiftdta[6:0], 1'b0};
@@ -128,7 +156,7 @@ module vidgen(
 		end
 		else shiftdta <= 0;
 	end
-	assign px_out = shiftdta[7];
+	assign px_out = enable;//shiftdta[7];
 endmodule
 
 
@@ -151,7 +179,7 @@ module tester(
 		$dumpfile("foo.vcd");	// Dump results to file.
 		$dumpvars;
 		clk = 0;
-	#18000000 $finish;
+	#1800000 $finish;
 	//#1800000 $finish;
 	end
 
@@ -164,13 +192,12 @@ endmodule
 module testbench;
 	wire [13:0] hpos;
 	wire [13:0] vpos;
-	wire clk, clk_pixel, clk_sync, q, qn;
+	wire clk, clk_pixel, clk_sync, clk_foo, q, qn;
 	wire hsync, vsync, enable;
 	wire px_out;
 
-	clock_by_4 cdiv(clk_pixel, clk_sync, clk);
-
+	clock_by_4 cdiv(clk_pixel, clk_foo, clk);
 	sync sync(hpos, vpos, hsync, vsync, enable,  clk_sync, clk_pixel);
-	vidgen vidgen(px_out, hpos, vpos, clk_pixel, enable);
+	vidgenAA vidgen(px_out, hpos, vpos, clk_sync, enable);
 	tester bar(clk, clk_pixel, clk_sync, hpos, vpos, hsync, vsync, enable, px_out);
 endmodule
