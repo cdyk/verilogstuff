@@ -6,7 +6,10 @@ module ram(
 		input re
 	);
 
-	reg [8:0] store [8:0];
+	reg [7:0] store [15:0];
+	initial begin
+		$readmemh("mem.dat", store);
+	end
 
 	assign D = we ? 8'bzzzzzzzz : store[A[7:0]];
 
