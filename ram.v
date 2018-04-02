@@ -6,7 +6,7 @@ module ram(
 		input re
 	);
 
-	reg [7:0] store [15:0];
+	reg [7:0] store [31:0];
 	initial begin
 		$readmemh("mem.dat", store);
 	end
