@@ -2,6 +2,7 @@
 #include <conio.h>
 #include <cstdint>
 #include <cassert>
+#include <string>
 
 enum UCode
 {
@@ -112,11 +113,11 @@ void clock(CPU& cpu)
   // set up PC for next instruction
   uint16_t next_pc_w;
   switch (cpu.reg_l.ucode & PC_MASK) {
-  case PC_ADD_0: next_pc_w = cpu.reg_l.pc;     printf("PC_ADD_0\n");  break;
-  case PC_ADD_1: next_pc_w = cpu.reg_l.pc + 1; printf("PC_ADD_1\n"); break;
-  case PC_ADD_2: next_pc_w = cpu.reg_l.pc + 2; printf("PC_ADD_2\n"); break;
-  case PC_ADD_3: next_pc_w = cpu.reg_l.pc + 3; printf("PC_ADD_3\n"); break;
-  case PC_SET_L: next_pc_w = cpu.reg_l.L;      printf("PC_SET_L\n"); break;
+  case PC_ADD_0: next_pc_w = cpu.reg_l.pc;     printf("PC_ADD_0 ");  break;
+  case PC_ADD_1: next_pc_w = cpu.reg_l.pc + 1; printf("PC_ADD_1 "); break;
+  case PC_ADD_2: next_pc_w = cpu.reg_l.pc + 2; printf("PC_ADD_2 "); break;
+  case PC_ADD_3: next_pc_w = cpu.reg_l.pc + 3; printf("PC_ADD_3 "); break;
+  case PC_SET_L: next_pc_w = cpu.reg_l.L;      printf("PC_SET_L "); break;
   default: assert(false);
   }
   cpu.reg_w.pc = next_pc_w;
@@ -131,8 +132,8 @@ void clock(CPU& cpu)
   uint16_t next_upc_w;
   switch (cpu.reg_l.ucode & UPC_MASK)
   {
-  case UPC_NEXT: next_upc_w = cpu.reg_l.upc + 1;    printf("UPC_NEXT\n"); break;
-  case UPC_SET:  next_upc_w = opcode_ucode_entry_w; printf("UPC_SET\n");  break;
+  case UPC_NEXT: next_upc_w = cpu.reg_l.upc + 1;    printf("UPC_NEXT "); break;
+  case UPC_SET:  next_upc_w = opcode_ucode_entry_w; printf("UPC_SET ");  break;
   default: assert(false);
   }
   cpu.reg_w.upc = next_upc_w;
@@ -153,16 +154,40 @@ void clock(CPU& cpu)
   default: assert(false);
   }
 
-  auto a = 1;
+  printf("\n\n");
 }
 
-void print(CPU& cpu)
+struct Print
 {
-  printf("----    PC=%04x A=%02x  X=%02x  Y=%02x L=%04x upc=%04x ucode=%08x\n",
-         cpu.reg_w.pc,
-         cpu.reg_w.A, cpu.reg_w.X, cpu.reg_w.Y, cpu.reg_w.L,
-         cpu.reg_w.upc, cpu.reg_w.ucode);
+  uint16_t PC = 0;
+  uint16_t ui = 0;
+  char buf[64] = { 0 };
+  bool new_instruction = false;
+};
 
+void print(Print& p, CPU& cpu)
+{
+  if (p.new_instruction) {
+    p.PC = cpu.reg_l.pc;
+    p.ui = 0;
+
+    p.buf[0] = '\0';
+    switch (memory[p.PC]) {
+    case 0x4C: snprintf(p.buf, sizeof(p.buf), "%02x%02x%02x  JMP %04x", memory[p.PC], memory[p.PC + 1], memory[p.PC + 2], memory[p.PC + 1] | (memory[p.PC + 2] << 8)); break;
+    case 0xEA: snprintf(p.buf, sizeof(p.buf), "%02x      NOP", memory[p.PC]); break;
+
+    default:
+      snprintf(p.buf, sizeof(p.buf), "%02x      ???", memory[p.PC]);
+      break;
+    }
+  }
+  p.new_instruction = cpu.reg_w.ucode & UPC_SET;
+ 
+  printf("PC=%04x A=%02x  X=%02x  Y=%02x L=%04x\n\n",
+         cpu.reg_l.pc,
+         cpu.reg_l.A, cpu.reg_l.X, cpu.reg_l.Y, cpu.reg_l.L);
+
+  printf("%04x@%d: %s     upc=%04x ucode=%08x\n\n", p.PC, p.ui++, p.buf, cpu.reg_l.upc, cpu.reg_l.ucode);
 }
 
 
@@ -171,12 +196,12 @@ int main(int argc, char** argv)
   init();
 
   CPU cpu;
+  Print p;
   int ch;
-  print(cpu);
   do {
     cpu.reg_l = cpu.reg_w;
+    print(p, cpu);
     clock(cpu);
-    print(cpu);
     while ((ch = _getch()) == 0);
   } while (ch != EOF || ch != 'q');
 
