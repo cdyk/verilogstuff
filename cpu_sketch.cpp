@@ -66,22 +66,40 @@ uint8_t memory[0x10000] = { 0 };
 void init()
 {
   uint16_t c = 0;
-  // 0xEA: NOP
-  uCodeRomOpCodeMap[0xEA] = c;  // NOP
-  uCodeRom[c++] = (UCode)(FETCH | UPC_SET | PC_ADD_1);
+  
+  uCodeRomOpCodeMap[0xEA] = c;  // 0xEA: NOP
+  uCodeRom[c++] = (UCode)(FETCH | AGU_PC_0 | PC_ADD_1 | UPC_SET );
 
-  // 0x4C: JMP a
-  uCodeRomOpCodeMap[0x4C] = c;  // JMP addr
+  uCodeRomOpCodeMap[0x4C] = c;  // 0x4C: JMP #$xxxx
   uCodeRom[c++] = (UCode)(FETCH | AGU_PC_0 | PC_ADD_1 | UPC_NEXT);
   uCodeRom[c++] = (UCode)(FETCH | AGU_PC_0 | PC_ADD_1 | UPC_NEXT);
-  uCodeRom[c++] = (UCode)(FETCH | UPC_SET | PC_SET_L);
+  uCodeRom[c++] = (UCode)(FETCH | AGU_PC_0 | PC_SET_L | UPC_SET);
 
+  uCodeRomOpCodeMap[0xA2] = c;  // 0xA2: LDX #      - UNFINISHED
+  uCodeRom[c++] = (UCode)(FETCH | AGU_PC_0 | PC_ADD_1 | UPC_NEXT);
+  uCodeRom[c++] = (UCode)(FETCH | AGU_PC_0 | PC_ADD_1 | UPC_SET);
 
-  // 0xA9: LDA # 
+  uCodeRomOpCodeMap[0xCA] = c;  //  0xCA DEX        - UNFINISHED
+  uCodeRom[c++] = (UCode)(FETCH | AGU_PC_0 | PC_ADD_1 | UPC_SET);
+
+  uCodeRomOpCodeMap[0xD0] = c;  //  0xD0 BNE #$xx   - UNFINISHED
+  uCodeRom[c++] = (UCode)(FETCH | AGU_PC_0 | PC_ADD_1 | UPC_NEXT);
+  uCodeRom[c++] = (UCode)(FETCH | AGU_PC_0 | PC_ADD_1 | UPC_SET);
 
 
   c = 0;
+  memory[c++] = 0xA2; // LDX #3
+  memory[c++] = 0x03;
+
+  auto l = c;
+
   memory[c++] = 0xEA; // NOP
+
+  memory[c++] = 0xCA; // DEX
+
+  memory[c++] = 0xD0; // BNE ??
+  memory[c++] = l-c;
+
   memory[c++] = 0x4c; // JMP #$0000
   memory[c++] = 0x00;
   memory[c++] = 0x00;
@@ -154,7 +172,7 @@ void clock(CPU& cpu)
   default: assert(false);
   }
 
-  printf("\n\n");
+  printf("\n");
 }
 
 struct Print
@@ -173,21 +191,26 @@ void print(Print& p, CPU& cpu)
 
     p.buf[0] = '\0';
     switch (memory[p.PC]) {
-    case 0x4C: snprintf(p.buf, sizeof(p.buf), "%02x%02x%02x  JMP %04x", memory[p.PC], memory[p.PC + 1], memory[p.PC + 2], memory[p.PC + 1] | (memory[p.PC + 2] << 8)); break;
-    case 0xEA: snprintf(p.buf, sizeof(p.buf), "%02x      NOP", memory[p.PC]); break;
-
+    case 0x4C: snprintf(p.buf, sizeof(p.buf), "%02x %02x %02x  JMP %04x", memory[p.PC], memory[p.PC + 1], memory[p.PC + 2], memory[p.PC + 1] | (memory[p.PC + 2] << 8)); break;
+    case 0xA2: snprintf(p.buf, sizeof(p.buf), "%02x %02x     LDX #%02x ", memory[p.PC], memory[p.PC + 1], memory[p.PC + 1]); break;
+    case 0xCA: snprintf(p.buf, sizeof(p.buf), "%02x        DEX     ", memory[p.PC]); break;
+    case 0xD0: snprintf(p.buf, sizeof(p.buf), "%02x %02x     BNE #%02x ", memory[p.PC], memory[p.PC + 1], memory[p.PC + 1]); break;
+    case 0xEA: snprintf(p.buf, sizeof(p.buf), "%02x        NOP     ", memory[p.PC]); break;
     default:
       snprintf(p.buf, sizeof(p.buf), "%02x      ???", memory[p.PC]);
       break;
     }
   }
+  else {
+    snprintf(p.buf, sizeof(p.buf), "                  ");
+  }
   p.new_instruction = cpu.reg_w.ucode & UPC_SET;
  
-  printf("PC=%04x A=%02x  X=%02x  Y=%02x L=%04x\n\n",
+  printf("PC=%04x A=%02x  X=%02x  Y=%02x L=%04x    |    ",
          cpu.reg_l.pc,
          cpu.reg_l.A, cpu.reg_l.X, cpu.reg_l.Y, cpu.reg_l.L);
 
-  printf("%04x@%d: %s     upc=%04x ucode=%08x\n\n", p.PC, p.ui++, p.buf, cpu.reg_l.upc, cpu.reg_l.ucode);
+  printf("%04x@%d: %s  |  ", p.PC, p.ui++, p.buf);
 }
 
 
