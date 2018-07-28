@@ -1,17 +1,85 @@
-from enum import Enum, auto
+class Assembler:
+    def __init__(self, ram):
+        self.ram = ram
 
+    def curr(self):
+        return len(self.ram)
 
-class U(Enum):
-    PRINT = auto()
-    FETCH = auto()
-    STORE = auto()
-    ADDR_PC = auto()
-    PC_INCR = auto()
-    PC_SET = auto()
-    UPC_SET = auto()
-    UPC_NEXT = auto()
+    def LDX(self, val):
+        self.ram += [0xA2, val & 255]
+
+    def NOP(self):
+        self.ram.append(0xEA)
+
+    def DEX(self):
+        self.ram.append(0xCA)
+
+    def BNE(self, addr):
+        self.ram.append(0xD0)
+        self.ram.append((addr-self.curr())&255)
+    
+    def JMP(self, addr):
+        self.ram += [0x4C, 0x00, 0x00]
+
+class Disassembler:
+    def __init__(self, ram):
+        self.ram = ram
+        self.pc = 0
+        self.opcode_length = 0
+
+    def unknown(self):
+        self.opcode = "???"
+
+    def opcode_EA(self):
+        self.opcode = "NOP"
+    
+    def opcode_A2(self):
+        self.opcode = "LDX #${:02X}".format(self.ram[self.pc+1])
+        self.opcode_length = 2
+
+    def opcode_4C(self):
+        self.opcode = "JMP ${:02X}{:02X}".format(self.ram[self.pc+2], self.ram[self.pc+1])
+        self.opcode_length = 3
+
+    def opcode_CA(self):
+        self.opcode = "DEX"
+    
+    def opcode_D0(self):
+        self.opcode = "BNE ${:04X}".format(self.ram[self.pc+1])
+        self.opcode_length = 2
+
+    def decode(self):
+        q = len(ram)
+        n = self.pc + self.opcode_length
+        if 0 <= n and n < q:
+            self.pc = n
+            opcode_handler = getattr(self, "opcode_{:X}".format(self.ram[self.pc]), self.unknown)
+            self.opcode_length = 1
+            opcode_handler()
+            return [self.pc, self.opcode]
+        else:
+            return None
+
+    def disassembly(self):
+        opcode = self.decode()
+        while opcode:
+            yield opcode
+            opcode = self.decode()
+    
 
 class CPU:
+
+    # Ucode instructions
+    PRINT = object()
+    FETCH = object()
+    STORE = object()
+    ADDR_PC = object()
+    PC_INCR = object()
+    PC_SET = object()
+    UPC_SET = object()
+    UPC_NEXT = object()
+
+    # Ucode
     urom = []
 
     ulut = {}
@@ -19,23 +87,23 @@ class CPU:
         ulut[i] = 0
 
     ulut[0xEA] = len(urom)          # 0xEA: NOP
-    urom.append({U.FETCH, U.ADDR_PC, U.PC_INCR, U.UPC_SET, U.PRINT })
+    urom.append({FETCH, ADDR_PC, PC_INCR, UPC_SET, PRINT })
 
     ulut[0x4C] = len(urom)          # 0x4C: JMP #$xxxx
-    urom.append({U.FETCH, U.ADDR_PC, U.PC_INCR, U.UPC_NEXT, U.PRINT })
-    urom.append({U.FETCH, U.ADDR_PC, U.PC_INCR, U.UPC_NEXT })
-    urom.append({U.FETCH, U.ADDR_PC, U.PC_SET, U.UPC_SET })
+    urom.append({FETCH, ADDR_PC, PC_INCR, UPC_NEXT, PRINT })
+    urom.append({FETCH, ADDR_PC, PC_INCR, UPC_NEXT })
+    urom.append({FETCH, ADDR_PC, PC_SET, UPC_SET })
 
     ulut[0xA2] = len(urom)          # 0xA2: LDX #      - UNFINISHED
-    urom.append({U.FETCH, U.ADDR_PC, U.PC_INCR, U.UPC_NEXT, U.PRINT })
-    urom.append({U.FETCH, U.ADDR_PC, U.PC_INCR, U.UPC_SET })
+    urom.append({FETCH, ADDR_PC, PC_INCR, UPC_NEXT, PRINT })
+    urom.append({FETCH, ADDR_PC, PC_INCR, UPC_SET })
 
     ulut[0xCA] = len(urom)          # 0xCA: DEX        - UNFINISHED
-    urom.append({ U.FETCH, U.ADDR_PC, U.PC_INCR, U.UPC_SET, U.PRINT })
+    urom.append({ FETCH, ADDR_PC, PC_INCR, UPC_SET, PRINT })
 
     ulut[0xD0] = len(urom)          # 0xD0: BNE #$xx   - UNFINISHED
-    urom.append({U.FETCH, U.ADDR_PC, U.PC_INCR, U.UPC_NEXT, U.PRINT })
-    urom.append({U.FETCH, U.ADDR_PC, U.PC_INCR, U.UPC_SET })
+    urom.append({FETCH, ADDR_PC, PC_INCR, UPC_NEXT, PRINT })
+    urom.append({FETCH, ADDR_PC, PC_INCR, UPC_SET })
 
     def __init__(self, ram):
         self.upc = 0
@@ -60,16 +128,25 @@ class CPU:
         self.upc +=1
 
 
-ram = []
-ram += [0xA2, 0x03]                 # LDX #3
-label = len(ram)
-ram += [0xEA]                       # NOP
-ram += [0xCA]                       # DEX
-ram += [0xD0, ((label-(len(ram)+1))+256)%256]   # BNE label
-ram += [0x4C, 0x00, 0x00]           # JMP #$0000
 
+ram = []
+
+asm = Assembler(ram)
+asm.LDX(3)
+label = asm.curr()
+asm.NOP()
+asm.DEX()
+asm.BNE(label)
+asm.JMP(0)
+
+disasm = Disassembler(ram)
+for pc, opcode in disasm.disassembly():
+    print("{:04X} {:s}".format(pc, opcode))
+
+
+print(ram)
 
 cpu = CPU(ram)
 
-for i in range(10):
-    cpu.tick()
+#for i in range(10):
+#    cpu.tick()
