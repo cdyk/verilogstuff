@@ -65,11 +65,64 @@ class Disassembler:
         while opcode:
             yield opcode
             opcode = self.decode()
+
+class RegisterFileStore:
+    def __init__(self):
+        self.X = 0
+        self.Y = 0
+        self.A = 0
+        self.PC = 0
+        self.UPC = 0
+
+class RegisterFile:
+    def __init__(self):
+        self.R = RegisterFile()
+        self.W = RegisterFile()
+
+    def tick(self):
+        self.R, self.W = self.W, self.R
+
+    @property
+    def X(self):
+        return self.R.X
     
+    @X.setter
+    def X(self, value):
+        self.W.X = value
 
-class CPU:
+    @property
+    def Y(self):
+        return self.R.Y
+    
+    @Y.setter
+    def Y(self, value):
+        self.W.Y = value
 
-    # Ucode instructions
+    @property
+    def A(self):
+        return self.R.A
+    
+    @A.setter
+    def A(self, value):
+        self.W.A = value
+
+    @property
+    def PC(self):
+        return self.R.PC
+    
+    @PC.setter
+    def PC(self, value):
+        self.W.PC = value
+
+    @property
+    def UPC(self):
+        return self.R.UPC
+    
+    @UPC.setter
+    def UPC(self, value):
+        self.W.UPC = value
+
+class MicroCode:
     PRINT = object()
     FETCH = object()
     STORE = object()
@@ -105,28 +158,18 @@ class CPU:
     urom.append({FETCH, ADDR_PC, PC_INCR, UPC_NEXT, PRINT })
     urom.append({FETCH, ADDR_PC, PC_INCR, UPC_SET })
 
+class CPU(RegisterFile, MicroCode):
     def __init__(self, ram):
-        self.upc = 0
         self.ram = ram
-        self.pc = 0
-        self.A = 0
-        self.X = 0
-        self.Y = 0
-        self.nA = 0
-        self.nX = 0
-        self.nY = 0
 
     def tick(self):
-        print("upc={0}".format(self.upc))
+        super(RegisterFile, self).tick()
+
+        print("upc={0}".format(self.UPC))
 
         #uop = urom[self.upc]
 
-
-
-
-
-        self.upc +=1
-
+        self.UPC +=1
 
 
 ram = []
