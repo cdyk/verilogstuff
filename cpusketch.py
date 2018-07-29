@@ -96,6 +96,49 @@ class RegisterFile:
     def __setattr__(self, name, value):
         self.__dict__['_W'][name] = value
 
+class SB_SRC:
+    ADD = object()      # ADD/SB
+    X = object()        # X/SB
+    Y = object()        # Y/SB
+    S = object()        # S/SB
+    NONE = object()
+
+class DB_SRC:
+    DL = object()       # DL/DB
+    PCL = object()      # PCL/DB
+    PCH = object(),     # PCH/DB
+    SB = object(),      # SB/DB
+    P = object()        # P/DB
+    NONE = object()
+
+class AI_SRC:
+    SB = object()       # SB/ADD
+    ZERO = object()     # O/ADD
+    NONE = object()     # don't care
+
+class BI_SRC:
+    DB = object()       # DB/ADD
+    INV_DB = object()   # ~DB/ADD
+    ADL = object()      # ADL/ADD
+    NONE = object()     # don't care
+
+class ALU_OPS:
+    SUM = object()
+    OR = object()
+    XOR = object()
+    AND = object()
+    SRS = object()
+    NONE = object()     # don't care
+
+class CARRY_SRC:
+    ACR = object()      # ACR/C
+    NONE = object()
+
+class OVERFLOW_SRC:
+    AVR = object()      # AVR/V
+    NONE = object()
+
+
 class MicroCode:
     PRINT = object()
     FETCH = object()
@@ -132,34 +175,27 @@ class MicroCode:
     urom.append({FETCH, ADDR_PC, PC_INCR, UPC_NEXT, PRINT })
     urom.append({FETCH, ADDR_PC, PC_INCR, UPC_SET })
 
-def special_bus(regs, add_sb=False, x_sb=False, y_sb=False, s_sb=False):
-    if add_sb:
-        return regs.ADD
-    elif x_sb:
-        return regs.X
-    elif y_sb:
-        return regs.Y
-    elif s_sb:
-        return regs.S
-    else:
-        return 0
+def special_bus(regs, sb_src=SB_SRC.NONE):
+    return {
+        SB_SRC.ADD: regs.ADD,
+        SB_SRC.X: regs.X,
+        SB_SRC.Y: regs.Y,
+        SB_SRC.S: regs.S,
+        SB_SRC.NONE: 0,
+    }[sb_src]
 
-def data_bus(regs, DL, SB, dl_db=False, pcl_db=False, pch_db=False, sb_db=False, p_db=False):
-    if dl_db:
-        return DL
-    elif pcl_db:
-        return regs.PC & 255
-    elif pch_db:
-        return (regs.PC>>8) & 255
-    elif sb_db:
-        return SB
-    elif p_db:
-        return ((  1 if regs.CARRY    else 0) |
-                (  2 if regs.ZERO     else 0) |
-                ( 64 if regs.OVERFLOW else 0) |
-                (128 if regs.NEGATIVE else 0))
-    else:
-        return 0
+def data_bus(regs, DL, SB, db_src=DB_SRC.NONE):
+    return {
+        DB_SRC.DL: DL,
+        DB_SRC.PCL: regs.PC & 255,
+        DB_SRC.PCH: (regs.PC>>8) & 255,
+        DB_SRC.SB: SB,
+        DB_SRC.P: ((  1 if regs.CARRY    else 0) |
+                   (  2 if regs.ZERO     else 0) |
+                   ( 64 if regs.OVERFLOW else 0) |
+                   (128 if regs.NEGATIVE else 0)),
+        DB_SRC.NONE: 0,
+    }[db_src]
 
 def address_bus_lo(regs, DL, dl_adl=False, pcl_adl=False, s_adl=False, add_adl=False):
     if dl_adl:
@@ -181,50 +217,50 @@ def address_bus_hi(regs, DL, dl_adh=False, pch_adh=False):
     else:
         return 0
 
-def input_reg_A(regs, SB, sb_add=False, o_add=False):
-    if sb_add:
-        regs.AI = SB
-    elif o_add:
-        regs.AI = 0
-    else:
-        regs.AI = 0
+def input_reg_A(regs, SB, ai_src=AI_SRC.NONE):
+    regs.AI = {
+        AI_SRC.SB: SB,
+        AI_SRC.ZERO: 0,
+        AI_SRC.NONE: 0
+    }[ai_src]
 
-def input_reg_B(regs, DB, ADL, db_add=False, db_add_inv=False, adl_add=False):
-    if db_add:
-        regs.BI = DB
-    elif db_add_inv:
-        regs.BI = (~DB)&255
-    elif adl_add:
-        regs.BI = ADL & 255
-    else:
-        regs.BI = 0
+def input_reg_B(regs, DB, ADL, bi_src=BI_SRC.NONE):
+    regs.BI = {
+        BI_SRC.DB: DB,
+        BI_SRC.INV_DB: (~DB) & 255 ,
+        BI_SRC.ADL: ADL & 255,
+        BI_SRC.NONE: 0
+    }[bi_src]
 
-def alu(regs, sum_en=False, or_en=False, xor_en=False, and_en=False, srs_en=False, acr_c=False, avr_v=False):
+
+def alu(regs, alu_ops=ALU_OPS.NONE, acr_c=False, avr_v=False):
     A = regs.AI
     B = regs.BI
-    carry = regs.CARRY
-    if sum_en:
-        O = (A + B + carry)
-        carry = 1 if O & 256 else 0
-    elif or_en:
-        O = (A | B)
-    elif xor_en:
-        O = (A ^ B)
-    elif and_en:
-        O = (A & B)
-    elif srs_en:
-        O = (A << 1) | carry
-        carry = 1 if O & 256 else 0
-    else:
-        O = 0
-    if avr_v:
-        i = 1 if A & 128 else 0
-        j = 1 if B & 128 else 0
-        k = 1 if O & 128 else 0
-        regs.OVERFLOW = (~(i ^ j) & (i ^ k))&1
-    if acr_c:
-        regs.CARRY = carry
+    O = {
+        ALU_OPS.SUM: (A + B + regs.CARRY), 
+        ALU_OPS.OR:  (A | B),
+        ALU_OPS.XOR: (A ^ B),
+        ALU_OPS.AND: (A & B),
+        ALU_OPS.SRS: (A << 1) | regs.CARRY,
+        ALU_OPS.NONE: 0,
+    }[alu_ops]
+    i = 1 if A & 128 else 0
+    j = 1 if B & 128 else 0
+    k = 1 if O & 128 else 0
+    AVR = (~(i ^ j) & (i ^ k))&1
+    ACR = 1 if O & 256 else 0
     regs.ADD = O & 255
+    return ACR, AVR
+
+def status_register(regs, ACR, AVR, carry_src, overflow_src):
+    regs.CARRY = {
+        CARRY_SRC.ACR: ACR,
+        CARRY_SRC.NONE: regs.CARRY
+    }[carry_src]
+    regs.OVERFLOW = {
+        OVERFLOW_SRC.AVR: AVR,
+        OVERFLOW_SRC.NONE: regs.OVERFLOW
+    }[overflow_src]
 
 def program_counter(PC, inc_en, SP):
     pass
@@ -238,13 +274,16 @@ class CPU(MicroCode):
         self.regs.tick()
 
         DL = 0  # Input data latch
-        SB = special_bus(self.regs, add_sb=False, x_sb=False, y_sb=False, s_sb=False)
-        DB = data_bus(self.regs, DL, SB, dl_db=False, pcl_db=False, pch_db=False, sb_db=False, p_db=False)
+        SB = special_bus(self.regs, sb_src=SB_SRC.NONE)
+        DB = data_bus(self.regs, DL, SB, db_src=DB_SRC.NONE)
         ADL = address_bus_lo(self.regs, DL, dl_adl=False, pcl_adl=False, s_adl=False, add_adl=False)
         ADH = address_bus_hi(self.regs, DL, dl_adh=False, pch_adh=False)
-        input_reg_A(self.regs, SB, sb_add=False, o_add=False)
-        input_reg_B(self.regs, DB, ADL, db_add=False, db_add_inv=False, adl_add=False)
-        alu(self.regs, sum_en=False, or_en=False, xor_en=False, and_en=False, srs_en=False, acr_c=False, avr_v=False)
+        input_reg_A(self.regs, SB, ai_src=AI_SRC.NONE)
+        input_reg_B(self.regs, DB, ADL, bi_src=BI_SRC.NONE)
+
+        ACR, AVR = alu(self.regs, alu_ops=ALU_OPS.NONE)
+        status_register(self.regs, ACR, AVR, carry_src=CARRY_SRC.NONE, overflow_src=OVERFLOW_SRC.NONE)
+
 
         print("upc={0}".format(self.regs.UPC))
 
