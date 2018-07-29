@@ -66,99 +66,35 @@ class Disassembler:
             yield opcode
             opcode = self.decode()
 
-class RegisterFileStore:
-    def __init__(self):
-        self.X = 0
-        self.Y = 0
-        self.A = 0
-        self.ALU_A = 0
-        self.ALU_B = 0
-        self.ALU_O = 0
-        self.PC = 0
-        self.UPC = 0
-        self.CARRY = 0
-        self.OVERFLOW = 0
-
 class RegisterFile:
+    """Latched register file"""
     def __init__(self):
-        self.R = RegisterFileStore()
-        self.W = RegisterFileStore()
+        F = {
+            'X': 0,
+            'Y': 0,
+            'A': 0,
+            'S': 0,     # Stack pointer register
+            'ADD': 0,   # Adder hold register
+            'AI': 0,    # A input register
+            'BI': 0,    # B input register
+            'PC': 0,
+            'UPC': 0,
+            'CARRY': 0,
+            'ZERO': 0,
+            'NEGATIVE': 0,
+            'OVERFLOW': 0
+        }
+        self.__dict__['_R'] = F
+        self.__dict__['_W'] = F.copy()
 
     def tick(self):
-        self.R, self.W = self.W, self.R
+        self.__dict__['_R'], self.__dict__['_W'] = self.__dict__['_W'], self.__dict__['_R']
 
-    @property
-    def X(self):
-        return self.R.X
+    def __getattr__(self, name):
+        return self.__dict__['_R'][name]
     
-    @X.setter
-    def X(self, value):
-        self.W.X = value
-
-    @property
-    def Y(self):
-        return self.R.Y
-    
-    @Y.setter
-    def Y(self, value):
-        self.W.Y = value
-
-    @property
-    def A(self):
-        return self.R.A
-    
-    @A.setter
-    def A(self, value):
-        self.W.A = value
-
-    @property
-    def ALU_A(self):
-        return self.R.ALU_A
-    
-    @ALU_A.setter
-    def ALU_A(self, value):
-        self.W.ALU_A = value
-
-    @property
-    def ALU_B(self):
-        return self.R.ALU_B
-    
-    @ALU_B.setter
-    def ALU_B(self, value):
-        self.W.ALU_B = value
-
-    @property
-    def PC(self):
-        return self.R.PC
-    
-    @PC.setter
-    def PC(self, value):
-        self.W.PC = value
-
-    @property
-    def UPC(self):
-        return self.R.UPC
-    
-    @UPC.setter
-    def UPC(self, value):
-        self.W.UPC = value
-
-    @property
-    def CARRY(self):
-        return self.R.CARRY
-    
-    @CARRY.setter
-    def CARRY(self, value):
-        self.W.CARRY = value
-
-    @property
-    def OVERFLOW(self):
-        return self.R.OVERFLOW
-    
-    @OVERFLOW.setter
-    def OVERFLOW(self, value):
-        self.W.OVERFLOW = value
-
+    def __setattr__(self, name, value):
+        self.__dict__['_W'][name] = value
 
 class MicroCode:
     PRINT = object()
@@ -196,63 +132,126 @@ class MicroCode:
     urom.append({FETCH, ADDR_PC, PC_INCR, UPC_NEXT, PRINT })
     urom.append({FETCH, ADDR_PC, PC_INCR, UPC_SET })
 
-class ALU:
-    OP_SUMS = object()
-    OP_ORS = object()
-    OP_XORS = object()
-    OP_ANDS = object()
-    OP_SRS = object()
+def special_bus(regs, add_sb=False, x_sb=False, y_sb=False, s_sb=False):
+    if add_sb:
+        return regs.ADD
+    elif x_sb:
+        return regs.X
+    elif y_sb:
+        return regs.Y
+    elif s_sb:
+        return regs.S
+    else:
+        return 0
 
-    def __init__(self, regs):
-        self.regs = regs
-        pass
+def data_bus(regs, DL, SB, dl_db=False, pcl_db=False, pch_db=False, sb_db=False, p_db=False):
+    if dl_db:
+        return DL
+    elif pcl_db:
+        return regs.PC & 255
+    elif pch_db:
+        return (regs.PC>>8) & 255
+    elif sb_db:
+        return SB
+    elif p_db:
+        return ((  1 if regs.CARRY    else 0) |
+                (  2 if regs.ZERO     else 0) |
+                ( 64 if regs.OVERFLOW else 0) |
+                (128 if regs.NEGATIVE else 0))
+    else:
+        return 0
 
-    def set_overflow(self, A, B, O):
+def address_bus_lo(regs, DL, dl_adl=False, pcl_adl=False, s_adl=False, add_adl=False):
+    if dl_adl:
+        return DL
+    elif pcl_adl:
+        return regs.PC & 255
+    elif s_adl:
+        return regs.S
+    elif add_adl:
+        return regs.ADD
+    else:
+        return 0
+
+def address_bus_hi(regs, DL, dl_adh=False, pch_adh=False):
+    if dl_adh:
+        return DL
+    elif pch_adh:
+        return (regs.PC >> 8) & 255
+    else:
+        return 0
+
+def input_reg_A(regs, SB, sb_add=False, o_add=False):
+    if sb_add:
+        regs.AI = SB
+    elif o_add:
+        regs.AI = 0
+    else:
+        regs.AI = 0
+
+def input_reg_B(regs, DB, ADL, db_add=False, db_add_inv=False, adl_add=False):
+    if db_add:
+        regs.BI = DB
+    elif db_add_inv:
+        regs.BI = (~DB)&255
+    elif adl_add:
+        regs.BI = ADL & 255
+    else:
+        regs.BI = 0
+
+def alu(regs, sum_en=False, or_en=False, xor_en=False, and_en=False, srs_en=False, acr_c=False, avr_v=False):
+    A = regs.AI
+    B = regs.BI
+    carry = regs.CARRY
+    if sum_en:
+        O = (A + B + carry)
+        carry = 1 if O & 256 else 0
+    elif or_en:
+        O = (A | B)
+    elif xor_en:
+        O = (A ^ B)
+    elif and_en:
+        O = (A & B)
+    elif srs_en:
+        O = (A << 1) | carry
+        carry = 1 if O & 256 else 0
+    else:
+        O = 0
+    if avr_v:
         i = 1 if A & 128 else 0
         j = 1 if B & 128 else 0
         k = 1 if O & 128 else 0
-        self.regs.OVERFLOW = (~(i ^ j) & (i ^ k))&1
+        regs.OVERFLOW = (~(i ^ j) & (i ^ k))&1
+    if acr_c:
+        regs.CARRY = carry
+    regs.ADD = O & 255
 
-    def tick(self, op):
-        A = self.regs.A
-        B = self.regs.B
-        O = 0
-        if op == OP_SUMS:
-            O = (A + B + self.regs.CARRY)
-            self.regs.carry = 1 if O & 256 else 0
-        elif op == OP_ORS:
-            O = (A | B)
-        elif op == OP_XORS:
-            O = (A ^ B)
-        elif op == OP_ANDS:
-            O = (A & B)
-        elif op == OP_SRS:
-            O = (A << 1) | self.regs.CARRY
-            self.regs.carry = 1 if O & 256 else 0
-        else:
-           assert False
-
-        self.regs.O = O & 255
-        self.set_overflow(A, B, O)
-        # ignore half-carry for now
+def program_counter(PC, inc_en, SP):
+    pass
 
 class CPU(MicroCode):
     def __init__(self, ram):
         self.ram = ram
         self.regs = RegisterFile()
-        self.alu = ALU(self.regs)
 
     def tick(self):
-
         self.regs.tick()
 
-        self.alu.tick(ALU.OP_SUMS)
+        DL = 0  # Input data latch
+        SB = special_bus(self.regs, add_sb=False, x_sb=False, y_sb=False, s_sb=False)
+        DB = data_bus(self.regs, DL, SB, dl_db=False, pcl_db=False, pch_db=False, sb_db=False, p_db=False)
+        ADL = address_bus_lo(self.regs, DL, dl_adl=False, pcl_adl=False, s_adl=False, add_adl=False)
+        ADH = address_bus_hi(self.regs, DL, dl_adh=False, pch_adh=False)
+        input_reg_A(self.regs, SB, sb_add=False, o_add=False)
+        input_reg_B(self.regs, DB, ADL, db_add=False, db_add_inv=False, adl_add=False)
+        alu(self.regs, sum_en=False, or_en=False, xor_en=False, and_en=False, srs_en=False, acr_c=False, avr_v=False)
 
         print("upc={0}".format(self.regs.UPC))
 
         #uop = urom[self.upc]
 
         self.regs.UPC +=1
+
 
 
 ram = []
@@ -274,8 +273,8 @@ print(ram)
 
 cpu = CPU(ram)
 
-#for i in range(10):
-#    cpu.tick()
+for i in range(2):
+    cpu.tick()
 
 
 #import itertools
