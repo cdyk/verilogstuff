@@ -71,13 +71,18 @@ class RegisterFileStore:
         self.X = 0
         self.Y = 0
         self.A = 0
+        self.ALU_A = 0
+        self.ALU_B = 0
+        self.ALU_O = 0
         self.PC = 0
         self.UPC = 0
+        self.CARRY = 0
+        self.OVERFLOW = 0
 
 class RegisterFile:
     def __init__(self):
-        self.R = RegisterFile()
-        self.W = RegisterFile()
+        self.R = RegisterFileStore()
+        self.W = RegisterFileStore()
 
     def tick(self):
         self.R, self.W = self.W, self.R
@@ -107,6 +112,22 @@ class RegisterFile:
         self.W.A = value
 
     @property
+    def ALU_A(self):
+        return self.R.ALU_A
+    
+    @ALU_A.setter
+    def ALU_A(self, value):
+        self.W.ALU_A = value
+
+    @property
+    def ALU_B(self):
+        return self.R.ALU_B
+    
+    @ALU_B.setter
+    def ALU_B(self, value):
+        self.W.ALU_B = value
+
+    @property
     def PC(self):
         return self.R.PC
     
@@ -121,6 +142,23 @@ class RegisterFile:
     @UPC.setter
     def UPC(self, value):
         self.W.UPC = value
+
+    @property
+    def CARRY(self):
+        return self.R.CARRY
+    
+    @CARRY.setter
+    def CARRY(self, value):
+        self.W.CARRY = value
+
+    @property
+    def OVERFLOW(self):
+        return self.R.OVERFLOW
+    
+    @OVERFLOW.setter
+    def OVERFLOW(self, value):
+        self.W.OVERFLOW = value
+
 
 class MicroCode:
     PRINT = object()
@@ -158,18 +196,63 @@ class MicroCode:
     urom.append({FETCH, ADDR_PC, PC_INCR, UPC_NEXT, PRINT })
     urom.append({FETCH, ADDR_PC, PC_INCR, UPC_SET })
 
-class CPU(RegisterFile, MicroCode):
+class ALU:
+    OP_SUMS = object()
+    OP_ORS = object()
+    OP_XORS = object()
+    OP_ANDS = object()
+    OP_SRS = object()
+
+    def __init__(self, regs):
+        self.regs = regs
+        pass
+
+    def set_overflow(self, A, B, O):
+        i = 1 if A & 128 else 0
+        j = 1 if B & 128 else 0
+        k = 1 if O & 128 else 0
+        self.regs.OVERFLOW = (~(i ^ j) & (i ^ k))&1
+
+    def tick(self, op):
+        A = self.regs.A
+        B = self.regs.B
+        O = 0
+        if op == OP_SUMS:
+            O = (A + B + self.regs.CARRY)
+            self.regs.carry = 1 if O & 256 else 0
+        elif op == OP_ORS:
+            O = (A | B)
+        elif op == OP_XORS:
+            O = (A ^ B)
+        elif op == OP_ANDS:
+            O = (A & B)
+        elif op == OP_SRS:
+            O = (A << 1) | self.regs.CARRY
+            self.regs.carry = 1 if O & 256 else 0
+        else:
+           assert False
+
+        self.regs.O = O & 255
+        self.set_overflow(A, B, O)
+        # ignore half-carry for now
+
+class CPU(MicroCode):
     def __init__(self, ram):
         self.ram = ram
+        self.regs = RegisterFile()
+        self.alu = ALU(self.regs)
 
     def tick(self):
-        super(RegisterFile, self).tick()
 
-        print("upc={0}".format(self.UPC))
+        self.regs.tick()
+
+        self.alu.tick(ALU.OP_SUMS)
+
+        print("upc={0}".format(self.regs.UPC))
 
         #uop = urom[self.upc]
 
-        self.UPC +=1
+        self.regs.UPC +=1
 
 
 ram = []
@@ -193,3 +276,8 @@ cpu = CPU(ram)
 
 #for i in range(10):
 #    cpu.tick()
+
+
+#import itertools
+#for i, j, k in itertools.product(range(2), range(2), range(2)):
+#    print("{} {} {} -> {}".format(i, j, k, (~(i ^ j) & (i ^ k))&1))
