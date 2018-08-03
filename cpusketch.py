@@ -78,11 +78,12 @@ class RegisterFile:
             'AI': 0,    # A input register
             'BI': 0,    # B input register
             'PC': 0,
-            'UPC': 0,
             'CARRY': 0,
             'ZERO': 0,
             'NEGATIVE': 0,
-            'OVERFLOW': 0
+            'OVERFLOW': 0,
+            'T0': True,
+            'T1': False,
         }
         self.__dict__['_R'] = F
         self.__dict__['_W'] = F.copy()
@@ -101,7 +102,6 @@ class SB_SRC:
     X = object()        # X/SB
     Y = object()        # Y/SB
     S = object()        # S/SB
-    NONE = object()
 
 class DB_SRC:
     DL = object()       # DL/DB
@@ -109,18 +109,15 @@ class DB_SRC:
     PCH = object(),     # PCH/DB
     SB = object(),      # SB/DB
     P = object()        # P/DB
-    NONE = object()
 
 class AI_SRC:
     SB = object()       # SB/ADD
     ZERO = object()     # O/ADD
-    NONE = object()     # don't care
 
 class BI_SRC:
     DB = object()       # DB/ADD
     INV_DB = object()   # ~DB/ADD
     ADL = object()      # ADL/ADD
-    NONE = object()     # don't care
 
 class ALU_OPS:
     SUM = object()
@@ -128,63 +125,85 @@ class ALU_OPS:
     XOR = object()
     AND = object()
     SRS = object()
-    NONE = object()     # don't care
 
 class CARRY_SRC:
     ACR = object()      # ACR/C
-    NONE = object()
+    KEEP = object()
 
 class OVERFLOW_SRC:
     AVR = object()      # AVR/V
-    NONE = object()
+    KEEP = object()
+
+class AB_SRC:
+    DL_AB = object(),
+    PC_AB = object(),
+    S_AB = object(),
+    ADD_AB = object(),
+
+class PC_SRC:
+    AB = object(),
+    INC = object(),
+    KEEP = object(),
+
+class MEM_SRC:
+    FETCH = object(),
+    STORE = object(),
+    KEEP = object()
+
+class USelect:
+    def __init__(self, t0=None, t1=None):
+        self.t0 = t0
+        self.t1 = t1
+
+    def __eq__(self, other): 
+        return self.__dict__ == other.__dict__
+
+    def match(self, regs):
+        return (
+           self.t0 == None or self.t0 == regs.T0 and
+           self.t1 == None or self.t1 == regs.T1
+        )
+
+class UDrive:
+    def __init__(self,
+                 sb = None,
+                 db = None,
+                 ai = None,
+                 bi = None,
+                 alu = None,
+                 c = None,
+                 v = None):
+        self.sb = sb
+        self.db = db
+        self.ai = ai
+        self.bi = bi
+        self.alu = alu
+        self.c = c
+        self.v = v
+
+    def merge(self, other):
+        for key in self.__dict__:
+            if other.__dict__[key] != None:
+                assert self.__dict__[key] != None
+                self.__dict__[key] = other.__dict__[key]
+    
+class UCode:
+    lines = {
+        USelect(): UDrive(),
+        USelect(t0=True): UDrive()
+    }
 
 
-class MicroCode:
-    PRINT = object()
-    FETCH = object()
-    STORE = object()
-    ADDR_PC = object()
-    PC_INCR = object()
-    PC_SET = object()
-    UPC_SET = object()
-    UPC_NEXT = object()
-
-    # Ucode
-    urom = []
-
-    ulut = {}
-    for i in range(255):
-        ulut[i] = 0
-
-    ulut[0xEA] = len(urom)          # 0xEA: NOP
-    urom.append({FETCH, ADDR_PC, PC_INCR, UPC_SET, PRINT })
-
-    ulut[0x4C] = len(urom)          # 0x4C: JMP #$xxxx
-    urom.append({FETCH, ADDR_PC, PC_INCR, UPC_NEXT, PRINT })
-    urom.append({FETCH, ADDR_PC, PC_INCR, UPC_NEXT })
-    urom.append({FETCH, ADDR_PC, PC_SET, UPC_SET })
-
-    ulut[0xA2] = len(urom)          # 0xA2: LDX #      - UNFINISHED
-    urom.append({FETCH, ADDR_PC, PC_INCR, UPC_NEXT, PRINT })
-    urom.append({FETCH, ADDR_PC, PC_INCR, UPC_SET })
-
-    ulut[0xCA] = len(urom)          # 0xCA: DEX        - UNFINISHED
-    urom.append({ FETCH, ADDR_PC, PC_INCR, UPC_SET, PRINT })
-
-    ulut[0xD0] = len(urom)          # 0xD0: BNE #$xx   - UNFINISHED
-    urom.append({FETCH, ADDR_PC, PC_INCR, UPC_NEXT, PRINT })
-    urom.append({FETCH, ADDR_PC, PC_INCR, UPC_SET })
-
-def special_bus(regs, sb_src=SB_SRC.NONE):
+def special_bus(regs, src):
     return {
         SB_SRC.ADD: regs.ADD,
         SB_SRC.X: regs.X,
         SB_SRC.Y: regs.Y,
         SB_SRC.S: regs.S,
-        SB_SRC.NONE: 0,
-    }[sb_src]
+        None: 0,
+    }[src]
 
-def data_bus(regs, DL, SB, db_src=DB_SRC.NONE):
+def data_bus(regs, DL, SB, src):
     return {
         DB_SRC.DL: DL,
         DB_SRC.PCL: regs.PC & 255,
@@ -194,46 +213,43 @@ def data_bus(regs, DL, SB, db_src=DB_SRC.NONE):
                    (  2 if regs.ZERO     else 0) |
                    ( 64 if regs.OVERFLOW else 0) |
                    (128 if regs.NEGATIVE else 0)),
-        DB_SRC.NONE: 0,
-    }[db_src]
+        None: 0,
+    }[src]
 
-def address_bus_lo(regs, DL, dl_adl=False, pcl_adl=False, s_adl=False, add_adl=False):
-    if dl_adl:
-        return DL
-    elif pcl_adl:
-        return regs.PC & 255
-    elif s_adl:
-        return regs.S
-    elif add_adl:
-        return regs.ADD
-    else:
-        return 0
+def program_counter(regs, AB, src):
+    regs.PC = {
+        PC_SRC.AB: AB,
+        PC_SRC.INC: regs.PC + 1,
+        PC_SRC.KEEP: regs.PC,
+        None: regs.PC
+    }[src]
 
-def address_bus_hi(regs, DL, dl_adh=False, pch_adh=False):
-    if dl_adh:
-        return DL
-    elif pch_adh:
-        return (regs.PC >> 8) & 255
-    else:
-        return 0
+def address_bus(regs, DL, src):
+    return {
+        AB_SRC.DL_AB: DL,
+        AB_SRC.PC_AB: regs.PC,
+        AB_SRC.S_AB: regs.S,
+        AB_SRC.ADD_AB: regs.ADD,
+        None: 0,
+    }[src]
 
-def input_reg_A(regs, SB, ai_src=AI_SRC.NONE):
+def input_reg_A(regs, SB, src):
     regs.AI = {
         AI_SRC.SB: SB,
         AI_SRC.ZERO: 0,
-        AI_SRC.NONE: 0
-    }[ai_src]
+        None: 0
+    }[src]
 
-def input_reg_B(regs, DB, ADL, bi_src=BI_SRC.NONE):
+def input_reg_B(regs, DB, ADL, src):
     regs.BI = {
         BI_SRC.DB: DB,
         BI_SRC.INV_DB: (~DB) & 255 ,
         BI_SRC.ADL: ADL & 255,
-        BI_SRC.NONE: 0
-    }[bi_src]
+        None: 0
+    }[src]
 
 
-def alu(regs, alu_ops=ALU_OPS.NONE, acr_c=False, avr_v=False):
+def alu(regs, alu_ops):
     A = regs.AI
     B = regs.BI
     O = {
@@ -242,7 +258,7 @@ def alu(regs, alu_ops=ALU_OPS.NONE, acr_c=False, avr_v=False):
         ALU_OPS.XOR: (A ^ B),
         ALU_OPS.AND: (A & B),
         ALU_OPS.SRS: (A << 1) | regs.CARRY,
-        ALU_OPS.NONE: 0,
+        None: 0,
     }[alu_ops]
     i = 1 if A & 128 else 0
     j = 1 if B & 128 else 0
@@ -252,20 +268,24 @@ def alu(regs, alu_ops=ALU_OPS.NONE, acr_c=False, avr_v=False):
     regs.ADD = O & 255
     return ACR, AVR
 
+def mem_latch(regs, AB, mem, src):
+    if src == MEM_SRC.FETCH:
+        regs.MEM_I = mem[AB]
+    elif src == MEM_SRC.STORE:
+        mem[AB] = regs.MEM_O
+
 def status_register(regs, ACR, AVR, carry_src, overflow_src):
     regs.CARRY = {
         CARRY_SRC.ACR: ACR,
-        CARRY_SRC.NONE: regs.CARRY
+        CARRY_SRC.KEEP, None: regs.CARRY,
     }[carry_src]
     regs.OVERFLOW = {
         OVERFLOW_SRC.AVR: AVR,
-        OVERFLOW_SRC.NONE: regs.OVERFLOW
+        OVERFLOW_SRC.KEEP, None: regs.OVERFLOW
     }[overflow_src]
 
-def program_counter(PC, inc_en, SP):
-    pass
 
-class CPU(MicroCode):
+class CPU:
     def __init__(self, ram):
         self.ram = ram
         self.regs = RegisterFile()
@@ -273,24 +293,20 @@ class CPU(MicroCode):
     def tick(self):
         self.regs.tick()
 
+        drive = UDrive()
+        for line in UCode.lines:
+            if line.match(regs=self.regs):
+                drive.merge(line)
+
         DL = 0  # Input data latch
-        SB = special_bus(self.regs, sb_src=SB_SRC.NONE)
-        DB = data_bus(self.regs, DL, SB, db_src=DB_SRC.NONE)
-        ADL = address_bus_lo(self.regs, DL, dl_adl=False, pcl_adl=False, s_adl=False, add_adl=False)
-        ADH = address_bus_hi(self.regs, DL, dl_adh=False, pch_adh=False)
-        input_reg_A(self.regs, SB, ai_src=AI_SRC.NONE)
-        input_reg_B(self.regs, DB, ADL, bi_src=BI_SRC.NONE)
-
-        ACR, AVR = alu(self.regs, alu_ops=ALU_OPS.NONE)
-        status_register(self.regs, ACR, AVR, carry_src=CARRY_SRC.NONE, overflow_src=OVERFLOW_SRC.NONE)
-
-
-        print("upc={0}".format(self.regs.UPC))
-
-        #uop = urom[self.upc]
-
-        self.regs.UPC +=1
-
+        SB = special_bus(self.regs, drive.sb)
+        DB = data_bus(self.regs, DL, SB, drive.db)
+        AB = address_bus(self.regs, DL, drive.ab)
+        program_counter(self.regs, AB, drive.pc)
+        input_reg_A(self.regs, SB, drive.ai)
+        input_reg_B(self.regs, DB, AB, drive.bi)
+        ACR, AVR = alu(self.regs, drive.alu)
+        status_register(self.regs, ACR, AVR, carry_src=drive.c, overflow_src=drive.v)
 
 
 ram = []
